@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Hand Particles</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        canvas { display: block; }
+        #video-container {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 200px;
+            border: 2px solid #00eeee;
+            border-radius: 10px;
+            transform: scaleX(-1); /* Mirror video */
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #00eeee;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h1>Hand Magnet Particles</h1>
+        <p>Gunakan kamera dan gerakkan telunjuk Anda</p>
+    </div>
+    <video id="video-container" autoplay playsinline></video>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+
+        // --- Setup Three.js ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Partikel ---
+        const count = 5000;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(count * 3);
+        const velocities = new Float32Array(count * 3);
+
+        for(let i = 0; i < count * 3; i++) {
+            positions[i] = (Math.random() - 0.5) * 10;
+            velocities[i] = 0;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({
+            size: 0.03,
+            color: 0x00ffff,
+            transparent: true,
+            blending: THREE.AdditiveBlending
+        });
+
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+        camera.position.z = 5;
+
+        // --- Hand Tracking Logic ---
+        let handX = 0, handY = 0, isHandVisible = false;
+        const videoElement = document.getElementById('video-container');
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults((results) => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                isHandVisible = true;
+                // Ambil koordinat ujung jari telunjuk (Index Finger Tip - Landmark 8)
+                const tip = results.multiHandLandmarks[0][8];
+                // Konversi koordinat normal (0-1) ke koordinat 3D (-5 ke 5)
+                handX = (tip.x - 0.5) * -10; // Dibalik agar searah gerakan
+                handY = (tip.y - 0.5) * -10;
+            } else {
+                isHandVisible = false;
+            }
+        });
+
+        const cameraPipe = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 640, height: 480
+        });
+        cameraPipe.start();
+
+        // --- Loop Animasi dengan Fisika Magnet ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const pos = geometry.attributes.position.array;
+
+            for (let i = 0; i < count; i++) {
+                const i3 = i * 3;
+
+                if (isHandVisible) {
+                    // Tarikan Magnet ke arah jari
+                    const dx = handX - pos[i3];
+                    const dy = handY - pos[i3 + 1];
+                    const dz = 0 - pos[i3 + 2];
+                    
+                    pos[i3] += dx * 0.02; 
+                    pos[i3 + 1] += dy * 0.02;
+                    pos[i3 + 2] += dz * 0.02;
+                } else {
+                    // Efek mengambang jika tidak ada tangan
+                    pos[i3] += Math.sin(Date.now() * 0.001 + i) * 0.005;
+                    pos[i3 + 1] += Math.cos(Date.now() * 0.001 + i) * 0.005;
+                }
+            }
+
+            geometry.attributes.position.needsUpdate = true;
+            points.rotation.y += 0.002;
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
